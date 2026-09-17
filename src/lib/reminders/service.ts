@@ -6,6 +6,7 @@ import {
   findOverdueApprovals,
   getApproval,
   markAgencyNotifiedOverdue,
+  markReminderCancelled,
   markReminderFailed,
   markReminderSent,
   recordManualReminder,
@@ -143,6 +144,10 @@ export async function runReminderSweep(
       // Re-check under the claim: the client may have approved in the seconds
       // between the query and now.
       if (!approval || !isChaseable(approval.status)) {
+        // The claimed row itself is 'sending', not 'pending' — it needs its
+        // own close-out. cancelPendingReminders only reaches the rest of the
+        // sequence that never got this far.
+        await markReminderCancelled(claimed.id);
         await cancelPendingReminders(claimed.organization_id, claimed.approval_id);
         result.skipped += 1;
         continue;

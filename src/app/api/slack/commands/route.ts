@@ -9,14 +9,10 @@ import {
 } from "@/lib/db/repositories";
 import { LIST_PAGE_SIZE, listBlocks, type ListMode } from "@/lib/slack/blocks";
 import { buildCreateModalView } from "@/lib/slack/create-modal";
-import type { ApprovalStatus } from "@/lib/db/types";
+import { OPEN_LIST_STATUSES, RECENT_LIST_STATUSES } from "@/lib/slack/list-statuses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** Everything still waiting on somebody. */
-const OPEN: ApprovalStatus[] = ["waiting", "viewed", "overdue", "changes_requested"];
-const RECENT: ApprovalStatus[] = [...OPEN, "approved"];
 
 function ephemeral(text: string, blocks?: unknown[]) {
   return NextResponse.json({
@@ -53,17 +49,28 @@ export async function POST(request: Request) {
   switch (subcommand) {
     case "create":
     case "new": {
-      // Prefilled with whoever this person last sent an approval to, so a
-      // repeat approval is "swap the creative and deadline" rather than
-      // retyping a client's name and email for the third time this week.
-      const view = await buildCreateModalView(context.organizationId, userId);
-      // The channel travels in private_metadata so the confirmation lands
-      // where the command was typed.
-      await context.gateway.openView(triggerId, {
-        ...view,
-        private_metadata: channelId,
-      });
-      return new NextResponse(null, { status: 200 });
+      try {
+        // Prefilled with whoever this person last sent an approval to, so a
+        // repeat approval is "swap the creative and deadline" rather than
+        // retyping a client's name and email for the third time this week.
+        const view = await buildCreateModalView(context.organizationId, userId);
+        // The channel travels in private_metadata so the confirmation lands
+        // where the command was typed.
+        await context.gateway.openView(triggerId, {
+          ...view,
+          private_metadata: channelId,
+        });
+        return new NextResponse(null, { status: 200 });
+      } catch (error) {
+        // No modal is open yet to show an error in, unlike a button click on
+        // an already-open surface — a slow or failing lookup here (the
+        // prefill query, or Slack rejecting an expired trigger_id) has to
+        // fall back to an ephemeral message instead.
+        console.error("[slack] could not open the create modal:", error);
+        return ephemeral(
+          "Couldn't open that just now. Please run `/approval create` again.",
+        );
+      }
     }
 
     case "list":
@@ -72,7 +79,7 @@ export async function POST(request: Request) {
       const mode: ListMode =
         subcommand === "remind" ? "remind" : subcommand === "cancel" ? "cancel" : "default";
       const showAll = subcommand === "list" && args[1]?.toLowerCase() === "all";
-      const statuses = showAll ? RECENT : OPEN;
+      const statuses = showAll ? RECENT_LIST_STATUSES : OPEN_LIST_STATUSES;
 
       const [approvals, total, organization] = await Promise.all([
         listApprovals({
@@ -90,6 +97,7 @@ export async function POST(request: Request) {
         total,
         timezone: organization?.timezone ?? "UTC",
         mode,
+        showAll,
       });
       return ephemeral(text, blocks);
     }

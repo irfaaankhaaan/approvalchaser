@@ -324,14 +324,49 @@ export const LIST_PAGE_SIZE = 5;
  */
 export type ListMode = "default" | "remind" | "cancel";
 
+/** Encode paging state into one button value: `page:mode:statusSet`. */
+export function encodeListPage(
+  page: number,
+  mode: ListMode,
+  showAll: boolean,
+): string {
+  return `${page}:${mode}:${showAll ? "all" : "open"}`;
+}
+
+export interface DecodedListPage {
+  page: number;
+  mode: ListMode;
+  showAll: boolean;
+}
+
+/**
+ * Decode a pagination button's value.
+ *
+ * Falls back to page 0 in default mode on anything malformed — a button from
+ * a version of this message that no longer matches the current format
+ * should not throw, just show something sane.
+ */
+export function decodeListPage(value: string | undefined): DecodedListPage {
+  const [rawPage, rawMode, rawSet] = (value ?? "").split(":");
+  const mode: ListMode =
+    rawMode === "remind" || rawMode === "cancel" ? rawMode : "default";
+  return {
+    page: Math.max(0, Number(rawPage) || 0),
+    mode,
+    showAll: rawSet === "all",
+  };
+}
+
 export function listBlocks(input: {
   approvals: ApprovalWithClient[];
   page: number;
   total: number;
   timezone: string;
   mode?: ListMode;
+  showAll?: boolean;
 }): { text: string; blocks: SlackBlock[] } {
   const mode: ListMode = input.mode ?? "default";
+  const showAll = input.showAll ?? false;
 
   if (input.approvals.length === 0) {
     return {
@@ -374,7 +409,7 @@ export function listBlocks(input: {
         type: "button",
         action_id: ACTIONS.listPage,
         text: { type: "plain_text", text: "← Previous" },
-        value: String(input.page - 1),
+        value: encodeListPage(input.page - 1, mode, showAll),
       });
     }
     if (input.page < lastPage) {
@@ -382,7 +417,7 @@ export function listBlocks(input: {
         type: "button",
         action_id: ACTIONS.listPage,
         text: { type: "plain_text", text: "Next →" },
-        value: String(input.page + 1),
+        value: encodeListPage(input.page + 1, mode, showAll),
       });
     }
     blocks.push(context(`Page ${input.page + 1} of ${lastPage + 1}`));

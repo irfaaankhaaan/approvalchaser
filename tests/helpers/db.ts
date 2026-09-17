@@ -58,7 +58,7 @@ export async function createAgency(
   teamId = `T${Math.random().toString(36).slice(2, 10)}`,
 ) {
   const organization = await createOrganization(name, "UTC");
-  const installation = await upsertSlackInstallation({
+  const { installation } = await upsertSlackInstallation({
     organizationId: organization.id,
     teamId,
     teamName: name,

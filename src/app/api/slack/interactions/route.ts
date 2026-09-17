@@ -18,6 +18,7 @@ import {
   CALLBACKS,
   FIELDS,
   LIST_PAGE_SIZE,
+  decodeListPage,
   detailModalView,
   errorModalView,
   listBlocks,
@@ -35,12 +36,10 @@ import { presetOffsets } from "@/lib/reminders/schedule";
 import { mintAgencyLink } from "@/lib/crypto/signed-link";
 import { buildCreateModalView } from "@/lib/slack/create-modal";
 import { safeExternalUrl } from "@/lib/format";
-import type { ApprovalStatus } from "@/lib/db/types";
+import { OPEN_LIST_STATUSES, RECENT_LIST_STATUSES } from "@/lib/slack/list-statuses";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const OPEN: ApprovalStatus[] = ["waiting", "viewed", "overdue", "changes_requested"];
 
 /**
  * Slack interactivity.
@@ -116,21 +115,34 @@ async function handleBlockAction(
   // The welcome DM's button. Same modal `/approval create` opens, same
   // prefill — one way in, reached from two places.
   if (actionId === ACTIONS.create) {
-    const view = await buildCreateModalView(context.organizationId, userId);
-    await context.gateway.openView(triggerId, { ...view, private_metadata: channelId });
+    try {
+      const view = await buildCreateModalView(context.organizationId, userId);
+      await context.gateway.openView(triggerId, { ...view, private_metadata: channelId });
+    } catch (error) {
+      console.error("[slack] could not open the create modal:", error);
+      await context.gateway.openView(
+        triggerId,
+        errorModalView("Couldn't open that just now. Please try `/approval create` instead."),
+      );
+    }
     return new NextResponse(null, { status: 200 });
   }
 
   if (actionId === ACTIONS.listPage) {
-    const page = Number(action.value ?? "0") || 0;
+    // The button's value carries page, mode and status set together — losing
+    // any of them on "Next" would silently swap the user back to the default
+    // overflow-menu list, or drop approved items out of a `list all` view.
+    const { page, mode: pageMode, showAll } = decodeListPage(action.value);
+    const statuses = showAll ? RECENT_LIST_STATUSES : OPEN_LIST_STATUSES;
+
     const [approvals, total, organization] = await Promise.all([
       listApprovals({
         organizationId: context.organizationId,
-        statuses: OPEN,
+        statuses,
         limit: LIST_PAGE_SIZE,
         offset: page * LIST_PAGE_SIZE,
       }),
-      countApprovals({ organizationId: context.organizationId, statuses: OPEN }),
+      countApprovals({ organizationId: context.organizationId, statuses }),
       getOrganization(context.organizationId),
     ]);
     const { text, blocks } = listBlocks({
@@ -138,6 +150,8 @@ async function handleBlockAction(
       page,
       total,
       timezone: organization?.timezone ?? "UTC",
+      mode: pageMode,
+      showAll,
     });
     return NextResponse.json({ response_type: "ephemeral", replace_original: true, text, blocks });
   }

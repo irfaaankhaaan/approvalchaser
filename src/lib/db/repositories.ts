@@ -96,6 +96,20 @@ export async function upsertUserBySlackId(input: {
 // Slack installations
 // ---------------------------------------------------------------------------
 
+export interface UpsertSlackInstallationResult {
+  installation: SlackInstallation;
+  /**
+   * True only when this call created the row — a genuine first install of
+   * this team, not a concurrent duplicate. Reading `wasInserted` off this
+   * single statement's own result, rather than a separate SELECT taken
+   * beforehand, is what makes it race-proof: two OAuth callbacks racing on
+   * the same team_id (a double-clicked install button, a retried redirect)
+   * both hit this one atomic INSERT ... ON CONFLICT, and Postgres guarantees
+   * only one of them sees `xmax = 0`.
+   */
+  wasInserted: boolean;
+}
+
 export async function upsertSlackInstallation(input: {
   organizationId: string;
   teamId: string;
@@ -105,8 +119,8 @@ export async function upsertSlackInstallation(input: {
   botUserId: string;
   encryptedBotToken: string;
   installedBy?: string | null;
-}): Promise<SlackInstallation> {
-  const row = await sqlOne<SlackInstallation>(
+}): Promise<UpsertSlackInstallationResult> {
+  const row = await sqlOne<SlackInstallation & { was_inserted: boolean }>(
     `INSERT INTO slack_installations
        (organization_id, team_id, team_name, enterprise_id, app_id,
         bot_user_id, encrypted_bot_token, installed_by)
@@ -119,7 +133,7 @@ export async function upsertSlackInstallation(input: {
        encrypted_bot_token = EXCLUDED.encrypted_bot_token,
        installed_by        = EXCLUDED.installed_by,
        updated_at          = now()
-     RETURNING *`,
+     RETURNING *, (xmax = 0) AS was_inserted`,
     [
       input.organizationId,
       input.teamId,
@@ -131,7 +145,8 @@ export async function upsertSlackInstallation(input: {
       input.installedBy ?? null,
     ],
   );
-  return row!;
+  const { was_inserted, ...installation } = row!;
+  return { installation, wasInserted: was_inserted };
 }
 
 export async function getInstallationByTeamId(
@@ -594,6 +609,23 @@ export async function markReminderSent(reminderId: string): Promise<void> {
       WHERE id = $1`,
     [reminderId],
   );
+}
+
+/**
+ * Close out a claimed reminder that turned out not to be needed — the
+ * approval was decided in the gap between the sweep reading it as due and
+ * claiming it.
+ *
+ * `claimReminder` moves a row to 'sending' precisely so nothing else can pick
+ * it up; that also means nothing else can ever finish it. Without this call,
+ * such a row is stuck in 'sending' forever — `findDueReminders` only selects
+ * 'pending' rows, and `cancelPendingReminders` only touches 'pending' ones
+ * too, so neither the retry path nor the bulk-cancel path can ever reach it.
+ */
+export async function markReminderCancelled(reminderId: string): Promise<void> {
+  await sql(`UPDATE reminders SET status = 'cancelled' WHERE id = $1`, [
+    reminderId,
+  ]);
 }
 
 /**

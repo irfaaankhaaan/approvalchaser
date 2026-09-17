@@ -6,6 +6,7 @@ import {
   findApprovalByTokenHash,
   getApproval,
   insertApproval,
+  listEvents,
   listReminders,
   replaceReminderSequence,
   setApprovalDeadline,
@@ -621,13 +622,14 @@ export async function rescheduleApproval(input: {
       to: target,
     });
 
-    // Reopening after a change request is a new round of review, so it gets a
-    // new cycle. Without this, the new sequence would collide with reminder
-    // numbers that already carry the previous round's history and quietly
-    // schedule nothing.
-    if (approval.status === "changes_requested") {
-      await startNewReminderCycle(input.organizationId, input.approvalId);
-    }
+    // Both paths leave the current cycle's reminder rows consumed — sent for
+    // an approval that ran its course before going overdue, sent-or-cancelled
+    // for one reopened after changes were requested. Either way, the new
+    // schedule needs reminder_number slots that are still free: writing into
+    // the old cycle would silently insert nothing (replaceReminderSequence
+    // only touches pending/skipped rows), leaving the agency believing a
+    // fresh sequence was scheduled when none was.
+    await startNewReminderCycle(input.organizationId, input.approvalId);
   }
 
   const fresh = (await getApproval(input.organizationId, input.approvalId))!;
@@ -644,9 +646,7 @@ export async function approvalDetail(
   const approval = await getApproval(organizationId, approvalId);
   if (!approval) throw new ApprovalError("Approval not found.", "not_found");
   const [events, reminders] = await Promise.all([
-    import("@/lib/db/repositories").then((m) =>
-      m.listEvents(organizationId, approvalId),
-    ),
+    listEvents(organizationId, approvalId),
     listReminders(organizationId, approvalId),
   ]);
   return { approval, events, reminders };

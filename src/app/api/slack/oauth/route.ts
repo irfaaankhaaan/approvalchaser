@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { env } from "@/lib/env";
 import { verifyOAuthState } from "@/lib/slack/verify";
 import { encryptSecret } from "@/lib/crypto/secretbox";
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
     existing?.organization_id ??
     (await createOrganization(payload.team.name ?? "Agency")).id;
 
-  const installation = await upsertSlackInstallation({
+  const { installation, wasInserted } = await upsertSlackInstallation({
     organizationId,
     teamId: payload.team.id,
     teamName: payload.team.name ?? null,
@@ -81,15 +81,30 @@ export async function GET(request: Request) {
     installedBy: payload.authed_user?.id ?? null,
   });
 
-  // Best-effort and not awaited-for-correctness: if this fails, the install
-  // itself has already succeeded and the page below still says what to do.
-  await sendInstallWelcome(installation, payload.authed_user?.id);
+  // Only a genuine first install gets the "you're connected, here's how to
+  // start" DM. A re-install — Slack rotating the bot token, a teammate
+  // re-authorizing after a new scope is added — updates the same row, and a
+  // workspace that has been live for months does not need to be told to send
+  // its first approval. `wasInserted` comes from the upsert's own row, not a
+  // separate read taken beforehand, so a double-clicked install button or a
+  // retried redirect racing two callbacks for the same team cannot both see
+  // "no existing row" and both send the DM — only whichever request's INSERT
+  // actually won does.
+  if (wasInserted) {
+    // Deferred so the install page returns immediately rather than waiting
+    // on a Slack API round trip; `after()` still guarantees it runs to
+    // completion once the response is sent, unlike a bare un-awaited call,
+    // which a serverless runtime can tear down mid-flight.
+    after(() => sendInstallWelcome(installation, payload.authed_user?.id));
+  }
 
   return html(
     200,
     "Approval Chaser is installed",
-    "Check Slack — I've sent you a DM with the next step. Or head back and " +
-      "run <code>/approval create</code> in any channel.",
+    wasInserted
+      ? "Check Slack — I've sent you a DM with the next step. Or head back " +
+        "and run <code>/approval create</code> in any channel."
+      : "Head back to Slack — everything you had before is still there.",
   );
 }
 

@@ -142,3 +142,76 @@ describe("html escaping and URL safety", () => {
     expect(safeExternalUrl(null)).toBeNull();
   });
 });
+
+describe("ResendEmailProvider", () => {
+  it("sends the idempotency key as Resend's real request option, not a custom header", async () => {
+    let capturedPayload: unknown;
+    let capturedOptions: unknown;
+    const fakeClient = {
+      emails: {
+        async send(payload: unknown, options?: unknown) {
+          capturedPayload = payload;
+          capturedOptions = options;
+          return { data: { id: "email_123" }, error: null };
+        },
+      },
+    };
+
+    const { ResendEmailProvider } = await import("@/lib/email/resend");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const provider = new ResendEmailProvider("unused", fakeClient as any);
+
+    const result = await provider.send({
+      to: "sarah@example.com",
+      subject: "Approval required",
+      text: "text",
+      html: "<p>html</p>",
+      idempotencyKey: "approval:abc:request",
+    });
+
+    expect(result).toEqual({ id: "email_123", provider: "resend" });
+    // The key claim: idempotencyKey lands in the second argument, which is
+    // what becomes Resend's real `Idempotency-Key` header — not stuffed into
+    // a payload-level `headers` object Resend never dedupes on.
+    expect(capturedOptions).toEqual({ idempotencyKey: "approval:abc:request" });
+    expect(capturedPayload).not.toHaveProperty("headers");
+  });
+
+  it("omits the options argument entirely when there is no idempotency key", async () => {
+    let capturedOptions: unknown = "not called";
+    const fakeClient = {
+      emails: {
+        async send(_payload: unknown, options?: unknown) {
+          capturedOptions = options;
+          return { data: { id: "email_456" }, error: null };
+        },
+      },
+    };
+
+    const { ResendEmailProvider } = await import("@/lib/email/resend");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const provider = new ResendEmailProvider("unused", fakeClient as any);
+    await provider.send({ to: "a@b.com", subject: "s", text: "t", html: "h" });
+
+    expect(capturedOptions).toBeUndefined();
+  });
+
+  it("throws EmailDeliveryError when Resend rejects the message", async () => {
+    const fakeClient = {
+      emails: {
+        async send() {
+          return { data: null, error: { message: "domain not verified" } };
+        },
+      },
+    };
+
+    const { ResendEmailProvider, } = await import("@/lib/email/resend");
+    const { EmailDeliveryError } = await import("@/lib/email/provider");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const provider = new ResendEmailProvider("unused", fakeClient as any);
+
+    await expect(
+      provider.send({ to: "a@b.com", subject: "s", text: "t", html: "h" }),
+    ).rejects.toThrow(EmailDeliveryError);
+  });
+});

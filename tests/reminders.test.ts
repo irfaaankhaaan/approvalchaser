@@ -13,10 +13,12 @@ import {
   sendManualReminder,
 } from "@/lib/reminders/service";
 import {
+  cancelPendingReminders,
   claimReminder,
   findDueReminders,
   getApproval,
   listEvents,
+  markReminderCancelled,
   listReminders,
 } from "@/lib/db/repositories";
 
@@ -277,6 +279,78 @@ describe("the reminder engine", () => {
     expect(
       (await listReminders(agency.organization.id, approval.id)).map((r) => r.status),
     ).toEqual(["pending", "pending", "pending"]);
+  });
+
+  it("actually schedules new reminders when an overdue approval's deadline is pushed out", async () => {
+    // Every cycle-1 reminder gets consumed by the time an approval goes
+    // overdue — sent if it fired before the deadline, cancelled if it was
+    // still pending when the overdue sweep ran. Rescheduling has to give the
+    // new sequence a cycle where those reminder_number slots are free, or
+    // the new rows are silently discarded by the upsert's own guard.
+    const { approval } = await create(4, [720, 240, 120]);
+    await runOverdueSweep(new Date(new Date(approval.deadline).getTime() + minutes(5)));
+    expect(
+      (await listReminders(agency.organization.id, approval.id)).every(
+        (r) => r.status !== "pending",
+      ),
+    ).toBe(true);
+    h.email.clear();
+
+    const reopened = await rescheduleApproval({
+      organizationId: agency.organization.id,
+      approvalId: approval.id,
+      deadline: new Date(Date.now() + hours(48)),
+      reminderOffsets: [720, 240, 120],
+    });
+    expect(reopened.status).toBe("viewed");
+    expect(reopened.reminder_cycle).toBe(2);
+
+    const fresh = await listReminders(agency.organization.id, approval.id);
+    expect(fresh.filter((r) => r.cycle === 2 && r.status === "pending")).toHaveLength(3);
+
+    // And the sweep can actually reach them before the new deadline.
+    const sent = await runReminderSweep(
+      new Date(new Date(reopened.deadline).getTime() - hours(2) + minutes(1)),
+    );
+    expect(sent.sent).toBe(3);
+    expect(h.email.messagesTo("sarah@example.com").length).toBeGreaterThan(0);
+  });
+
+  it("resolves a claimed reminder directly, since cancelPendingReminders alone cannot reach it", async () => {
+    // This is the exact mechanism behind the bug the sweep's re-check guards
+    // against: the approval can be decided in the narrow window between
+    // findDueReminders reading a row as due and the sweep's chaseability
+    // check running for it (a real window when many reminders are due in one
+    // sweep and earlier ones take time to process). claimReminder has
+    // already moved the row from 'pending' to 'sending' by then, and
+    // cancelPendingReminders' own WHERE clause only ever matches 'pending'
+    // rows — so, reproduced directly:
+    const { approval } = await create(48);
+    const [due] = await findDueReminders(
+      new Date(new Date(approval.deadline).getTime() - hours(12) + minutes(1)),
+    );
+    const claimed = await claimReminder(due!.id);
+    expect(claimed!.status).toBe("sending");
+
+    // The bug: this call alone, the only thing the sweep did before the fix,
+    // leaves a 'sending' row untouched.
+    await cancelPendingReminders(agency.organization.id, approval.id);
+    const stillStuck = (await listReminders(agency.organization.id, approval.id)).find(
+      (r) => r.id === claimed!.id,
+    );
+    expect(stillStuck!.status).toBe("sending");
+
+    // The fix: resolve the claimed row itself.
+    await markReminderCancelled(claimed!.id);
+    const resolved = (await listReminders(agency.organization.id, approval.id)).find(
+      (r) => r.id === claimed!.id,
+    );
+    expect(resolved!.status).toBe("cancelled");
+
+    // And once cancelled, it is truly done — not eligible to be picked up
+    // by any later sweep, unlike a row stuck at 'sending' which is also
+    // never picked up again but for the wrong reason: nothing ever resolves it.
+    expect(await claimReminder(claimed!.id)).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------

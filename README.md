@@ -70,7 +70,7 @@ client side works immediately — including with JavaScript disabled.
 
 ```bash
 npm run check       # typecheck + lint + tests
-npm test            # 163 tests
+npm test            # 178 tests
 npm run db:migrate  # apply db/schema.sql to DATABASE_URL
 ```
 
@@ -289,7 +289,7 @@ On another host, call `GET /api/cron` every five minutes with
 ## Tests
 
 ```bash
-npm test     # 163 tests
+npm test     # 178 tests
 ```
 
 The suite runs against **real Postgres in-process** (PGlite), applying
@@ -299,14 +299,20 @@ clauses and the organization scoping are all genuinely exercised, not mocked.
 Covered: the state machine and every illegal transition; token generation,
 hashing and validation; bot-token encryption and tamper detection; signed
 agency and reminder links; Slack signature verification including forgery,
-replay and a modified body; OAuth state; reminder planning and rescheduling;
-the full loop from create → email → open → approve → Slack; change requests;
-cancellation; concurrent decisions; duplicate-reminder prevention under
-concurrent sweeps; reminder retry and give-up; deadline escalation; overdue
-escalation firing exactly once; reopening into a new cycle; organization
-isolation across ten scenarios; email templates and escaping; rate limiting
-under concurrency; the create-modal client prefill, including its own
-cross-organization isolation check; the install welcome DM.
+replay and a modified body; OAuth state; reminder planning and rescheduling,
+including an overdue approval's deadline being pushed out into a genuinely
+new reminder cycle; the full loop from create → email → open → approve →
+Slack; change requests; cancellation; concurrent decisions; duplicate-reminder
+prevention under concurrent sweeps; a claimed reminder being resolved rather
+than left stuck when its approval is decided out from under it; reminder
+retry and give-up; deadline escalation; overdue escalation firing exactly
+once; reopening into a new cycle; organization isolation across ten
+scenarios; list pagination carrying its mode and status set across pages;
+email templates and escaping; Resend's real idempotency option (not a
+lookalike custom header); rate limiting under concurrency; the create-modal
+client prefill, including its own cross-organization isolation check; the
+install welcome DM, sent exactly once even when two install callbacks race
+for the same workspace.
 
 ---
 
