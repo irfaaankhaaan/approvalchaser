@@ -1,0 +1,19 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets. Never commit these.
+.env
+.env.local
+.env*.local
+
+# Local development database (PGlite writes a directory here).
+.pgdata/
+
+.DS_Store
+*.log
+.vercel
+coverage/

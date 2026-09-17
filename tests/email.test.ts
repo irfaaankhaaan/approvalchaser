@@ -1,0 +1,144 @@
+import { describe, expect, it } from "vitest";
+import { MockEmailProvider } from "@/lib/email/mock";
+import {
+  approvalConfirmationEmail,
+  approvalRequestEmail,
+  changesRequestedEmail,
+  deadlineWarningEmail,
+  reminderEmail,
+  type EmailContext,
+} from "@/lib/email/templates";
+import { escapeHtml, safeExternalUrl } from "@/lib/format";
+
+const context: EmailContext = {
+  agencyName: "Northlight Studio",
+  clientName: "ABC Clothing",
+  contactName: "Sarah",
+  creativeName: "Instagram Reel #14",
+  creativeVersion: "v2",
+  creativeUrl: "https://example.com/reel14",
+  deadline: new Date("2026-09-18T16:00:00Z"),
+  timezone: "UTC",
+  approvalUrl: "https://chaser.test/approve/abc123",
+  notes: "Focus on the first three seconds.",
+};
+
+describe("the mock provider", () => {
+  it("records what it was asked to send", async () => {
+    const provider = new MockEmailProvider(false);
+    const result = await provider.send({
+      to: "sarah@example.com",
+      subject: "Hello",
+      text: "Body",
+      html: "<p>Body</p>",
+    });
+
+    expect(result.provider).toBe("mock");
+    expect(provider.outbox).toHaveLength(1);
+    expect(provider.messagesTo("SARAH@example.com")).toHaveLength(1);
+  });
+
+  it("clears", async () => {
+    const provider = new MockEmailProvider(false);
+    await provider.send({ to: "a@b.c", subject: "s", text: "t", html: "h" });
+    provider.clear();
+    expect(provider.outbox).toHaveLength(0);
+  });
+});
+
+describe("the five templates", () => {
+  it("puts the creative in the subject of the request", () => {
+    const message = approvalRequestEmail(context);
+    expect(message.subject).toBe("Approval required: Instagram Reel #14 (v2)");
+    expect(message.text).toContain("https://chaser.test/approve/abc123");
+    expect(message.html).toContain("https://chaser.test/approve/abc123");
+  });
+
+  it("says no account is needed, because that is the objection", () => {
+    expect(approvalRequestEmail(context).text.toLowerCase()).toContain(
+      "no account",
+    );
+  });
+
+  it("carries the generated wording into the reminder", () => {
+    const message = reminderEmail(context, "Just a nudge on the reel.");
+    expect(message.text).toContain("Just a nudge on the reel.");
+    expect(message.html).toContain("Just a nudge on the reel.");
+    expect(message.subject).toContain("Reminder");
+  });
+
+  it("marks the deadline warning differently from an ordinary reminder", () => {
+    expect(deadlineWarningEmail(context, "Last call.").subject).toContain(
+      "Deadline today",
+    );
+  });
+
+  it("confirms an approval without asking for anything else", () => {
+    const message = approvalConfirmationEmail(context);
+    expect(message.subject).toBe("Approved: Instagram Reel #14 (v2)");
+    expect(message.text).toContain("Nothing else is needed");
+  });
+
+  it("echoes the change request back to the client", () => {
+    const message = changesRequestedEmail(context, "Swap the opening shot.");
+    expect(message.text).toContain("Swap the opening shot.");
+    expect(message.html).toContain("Swap the opening shot.");
+  });
+
+  it("escapes a creative name that contains markup", () => {
+    const message = approvalRequestEmail({
+      ...context,
+      creativeName: '<script>alert("xss")</script>',
+    });
+    expect(message.html).not.toContain("<script>");
+    expect(message.html).toContain("&lt;script&gt;");
+  });
+
+  it("escapes a change request that contains markup", () => {
+    const message = changesRequestedEmail(
+      context,
+      '<img src=x onerror="alert(1)">',
+    );
+    expect(message.html).not.toContain("<img");
+    expect(message.html).toContain("&lt;img");
+  });
+
+  it("drops a creative URL that is not http(s), so it cannot become an href", () => {
+    const message = approvalRequestEmail({
+      ...context,
+      creativeUrl: "javascript:alert(1)",
+    });
+    expect(message.html).not.toContain("javascript:");
+    expect(message.text).not.toContain("javascript:");
+  });
+
+  it("omits optional sections when there is nothing to show", () => {
+    const message = approvalRequestEmail({
+      ...context,
+      notes: null,
+      creativeUrl: null,
+      creativeVersion: null,
+      contactName: null,
+    });
+    expect(message.subject).toBe("Approval required: Instagram Reel #14");
+    expect(message.text).toContain("Hi,");
+    expect(message.text).not.toContain("Preview:");
+  });
+});
+
+describe("html escaping and URL safety", () => {
+  it("escapes every character that matters", () => {
+    expect(escapeHtml(`<>&"'`)).toBe("&lt;&gt;&amp;&quot;&#39;");
+    expect(escapeHtml(null)).toBe("");
+  });
+
+  it("accepts http and https only", () => {
+    expect(safeExternalUrl("https://example.com/a")).toBe("https://example.com/a");
+    expect(safeExternalUrl("http://example.com/a")).toBe("http://example.com/a");
+    expect(safeExternalUrl("javascript:alert(1)")).toBeNull();
+    expect(safeExternalUrl("data:text/html,<script>")).toBeNull();
+    expect(safeExternalUrl("file:///etc/passwd")).toBeNull();
+    expect(safeExternalUrl("not a url")).toBeNull();
+    expect(safeExternalUrl(null)).toBeNull();
+  });
+});
