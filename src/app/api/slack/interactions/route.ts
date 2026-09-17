@@ -33,6 +33,7 @@ import {
 import { sendManualReminder } from "@/lib/reminders/service";
 import { presetOffsets } from "@/lib/reminders/schedule";
 import { mintAgencyLink } from "@/lib/crypto/signed-link";
+import { buildCreateModalView } from "@/lib/slack/create-modal";
 import { safeExternalUrl } from "@/lib/format";
 import type { ApprovalStatus } from "@/lib/db/types";
 
@@ -111,6 +112,14 @@ async function handleBlockAction(
       ] ?? action.action_id)
     : action.action_id;
   const approvalId = maybeId ?? "";
+
+  // The welcome DM's button. Same modal `/approval create` opens, same
+  // prefill — one way in, reached from two places.
+  if (actionId === ACTIONS.create) {
+    const view = await buildCreateModalView(context.organizationId, userId);
+    await context.gateway.openView(triggerId, { ...view, private_metadata: channelId });
+    return new NextResponse(null, { status: 200 });
+  }
 
   if (actionId === ACTIONS.listPage) {
     const page = Number(action.value ?? "0") || 0;

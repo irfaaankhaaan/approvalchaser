@@ -3,7 +3,7 @@ import {
   setApprovalSlackMessage,
 } from "@/lib/db/repositories";
 import { gatewayFor, type SlackBlock, type SlackGateway } from "@/lib/slack/client";
-import { approvalMessage } from "@/lib/slack/blocks";
+import { approvalMessage, installWelcomeMessage } from "@/lib/slack/blocks";
 import type { ApprovalWithClient, SlackInstallation } from "@/lib/db/types";
 
 /**
@@ -118,4 +118,26 @@ export async function announceStatusChange(
   if (!slack) return;
   await refreshApprovalMessage(approval, slack);
   await replyInThread(approval, message, slack);
+}
+
+/**
+ * DM the person who just installed the app.
+ *
+ * `chat.postMessage` opens a DM implicitly when `channel` is a user id, so
+ * this needs no scope beyond `chat:write`, which the install already
+ * requests. Best-effort: a failed DM (the installer has DMs restricted, for
+ * instance) is not a failed install — the static install page still says
+ * what to do next.
+ */
+export async function sendInstallWelcome(
+  installation: SlackInstallation,
+  slackUserId: string | null | undefined,
+): Promise<void> {
+  if (!slackUserId) return;
+  try {
+    const { text, blocks } = installWelcomeMessage();
+    await gatewayFor(installation).postMessage({ channel: slackUserId, text, blocks });
+  } catch (error) {
+    console.error("[slack] could not send the install welcome DM:", error);
+  }
 }

@@ -7,12 +7,8 @@ import {
   getOrganization,
   listApprovals,
 } from "@/lib/db/repositories";
-import {
-  LIST_PAGE_SIZE,
-  createModalView,
-  listBlocks,
-  type ListMode,
-} from "@/lib/slack/blocks";
+import { LIST_PAGE_SIZE, listBlocks, type ListMode } from "@/lib/slack/blocks";
+import { buildCreateModalView } from "@/lib/slack/create-modal";
 import type { ApprovalStatus } from "@/lib/db/types";
 
 export const runtime = "nodejs";
@@ -42,6 +38,7 @@ export async function POST(request: Request) {
   const form = new URLSearchParams(rawBody);
   const teamId = form.get("team_id");
   const channelId = form.get("channel_id") ?? "";
+  const userId = form.get("user_id") ?? "";
   const triggerId = form.get("trigger_id") ?? "";
   const args = (form.get("text") ?? "").trim().split(/\s+/).filter(Boolean);
   const subcommand = (args[0] ?? "help").toLowerCase();
@@ -56,12 +53,10 @@ export async function POST(request: Request) {
   switch (subcommand) {
     case "create":
     case "new": {
-      // Two days out, on the hour — a sensible starting point the picker can
-      // be dragged from, rather than "now", which is never the answer.
-      const suggested = new Date(Date.now() + 2 * 86_400_000);
-      suggested.setMinutes(0, 0, 0);
-
-      const view = createModalView(Math.floor(suggested.getTime() / 1000));
+      // Prefilled with whoever this person last sent an approval to, so a
+      // repeat approval is "swap the creative and deadline" rather than
+      // retyping a client's name and email for the third time this week.
+      const view = await buildCreateModalView(context.organizationId, userId);
       // The channel travels in private_metadata so the confirmation lands
       // where the command was typed.
       await context.gateway.openView(triggerId, {

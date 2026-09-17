@@ -190,6 +190,31 @@ export async function getClient(
   );
 }
 
+/**
+ * The client this Slack user most recently sent an approval to.
+ *
+ * Used to prefill the create modal: the person running `/approval create`
+ * is, most weeks, chasing the same handful of clients, and retyping a name,
+ * email and contact every single time is exactly the kind of busywork this
+ * product exists to remove. A read-only lookup, so it costs nothing on a
+ * user's very first approval — there is simply nothing to find yet.
+ */
+export async function getMostRecentClientForActor(
+  organizationId: string,
+  slackUserId: string,
+): Promise<Pick<Client, "name" | "email" | "contact_name"> | undefined> {
+  return sqlOne<Pick<Client, "name" | "email" | "contact_name">>(
+    `SELECT c.name, c.email, c.contact_name
+       FROM approvals a
+       JOIN clients c ON c.id = a.client_id
+       JOIN users u   ON u.id = a.created_by
+      WHERE a.organization_id = $1 AND u.slack_user_id = $2
+      ORDER BY a.created_at DESC
+      LIMIT 1`,
+    [organizationId, slackUserId],
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Approvals
 // ---------------------------------------------------------------------------

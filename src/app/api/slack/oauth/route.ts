@@ -7,6 +7,7 @@ import {
   getInstallationByTeamId,
   upsertSlackInstallation,
 } from "@/lib/db/repositories";
+import { sendInstallWelcome } from "@/lib/notifications/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
     existing?.organization_id ??
     (await createOrganization(payload.team.name ?? "Agency")).id;
 
-  await upsertSlackInstallation({
+  const installation = await upsertSlackInstallation({
     organizationId,
     teamId: payload.team.id,
     teamName: payload.team.name ?? null,
@@ -80,10 +81,15 @@ export async function GET(request: Request) {
     installedBy: payload.authed_user?.id ?? null,
   });
 
+  // Best-effort and not awaited-for-correctness: if this fails, the install
+  // itself has already succeeded and the page below still says what to do.
+  await sendInstallWelcome(installation, payload.authed_user?.id);
+
   return html(
     200,
     "Approval Chaser is installed",
-    "Head back to Slack and run <code>/approval create</code> in any channel.",
+    "Check Slack — I've sent you a DM with the next step. Or head back and " +
+      "run <code>/approval create</code> in any channel.",
   );
 }
 

@@ -49,10 +49,16 @@ You need Node 20.9+. You do **not** need a Postgres server to start.
 
 ```bash
 npm install
-cp .env.example .env.local     # then fill in the values below
-npm run db:seed                # optional: three demo approvals
+npm run setup    # creates .env.local and generates its two random secrets
+npm run db:seed  # optional: three demo approvals
 npm run dev
 ```
+
+`npm run setup` is the whole "generate two secrets and paste them in the
+right place" step done for you — it's safe to run again later, and leaves
+anything you've already filled in alone. The only things left to type by hand
+are the Slack app credentials (below), and only if you want Slack; the client
+side works without them.
 
 With `DATABASE_URL` left blank, the app runs **PGlite** — real Postgres,
 compiled to WASM, persisted in `.pgdata/`. The schema in `db/schema.sql` is
@@ -64,15 +70,15 @@ client side works immediately — including with JavaScript disabled.
 
 ```bash
 npm run check       # typecheck + lint + tests
-npm test            # 151 tests
+npm test            # 163 tests
 npm run db:migrate  # apply db/schema.sql to DATABASE_URL
 ```
 
 ### The minimum to fill in
 
-For the client side alone, nothing: the seed script and the approval page work
-out of the box. For Slack you need a Slack app (below). For real email you need
-a Resend key and a verified sending domain.
+For the client side alone, nothing: `npm run setup` plus the seed script and
+the approval page work out of the box. For Slack you need a Slack app (below).
+For real email you need a Resend key and a verified sending domain.
 
 ---
 
@@ -111,7 +117,10 @@ https://your-app.example.com/api/slack/interactions
 ```
 
 Then visit `https://your-app.example.com/api/slack/install` and approve. That
-one workspace becomes one organization.
+one workspace becomes one organization, and the installer gets a **DM in
+Slack** the moment it's done — with a button that opens the create modal
+directly, so there's no webpage to remember and no command to recall from a
+README to send the first approval.
 
 > Slack must reach your machine, so local Slack development needs a tunnel
 > (`ngrok http 3000` or similar) and `APP_URL` set to the tunnel's address.
@@ -124,6 +133,12 @@ one workspace becomes one organization.
 | `/approval list` | What's still open. `list all` includes approved |
 | `/approval remind` | Pick an approval and chase it now |
 | `/approval cancel` | Pick an approval and close it |
+
+The create modal **prefills the client, email and contact name** from
+whichever client you most recently sent an approval to. Most agencies chase
+the same handful of clients repeatedly — a second approval to the same client
+is then just the creative and the deadline, not the whole form again. Clear
+the field yourself the rare time it's someone new.
 
 Each approval posts one message, which is **updated in place** as its status
 changes. Reminders, approvals and escalations are **threaded replies** under
@@ -148,11 +163,12 @@ it, so one approval is one thread rather than a stream of channel noise.
 | `ANTHROPIC_API_KEY` | no | Reminder wording only. Templates are used without it |
 | `APPROVAL_TOKEN_TTL_DAYS` | no | Link lifetime, default 30 days |
 
-Generate the two secrets:
+`npm run setup` generates `SLACK_STATE_SECRET`, `TOKEN_ENCRYPTION_KEY` and
+`CRON_SECRET` for you. To generate one by hand instead:
 
 ```bash
-openssl rand -base64 32                                                   # SLACK_STATE_SECRET
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"  # TOKEN_ENCRYPTION_KEY
+openssl rand -base64 32                                                   # SLACK_STATE_SECRET / TOKEN_ENCRYPTION_KEY
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"     # CRON_SECRET
 ```
 
 ---
@@ -273,7 +289,7 @@ On another host, call `GET /api/cron` every five minutes with
 ## Tests
 
 ```bash
-npm test     # 151 tests
+npm test     # 163 tests
 ```
 
 The suite runs against **real Postgres in-process** (PGlite), applying
@@ -289,7 +305,8 @@ cancellation; concurrent decisions; duplicate-reminder prevention under
 concurrent sweeps; reminder retry and give-up; deadline escalation; overdue
 escalation firing exactly once; reopening into a new cycle; organization
 isolation across ten scenarios; email templates and escaping; rate limiting
-under concurrency.
+under concurrency; the create-modal client prefill, including its own
+cross-organization isolation check; the install welcome DM.
 
 ---
 

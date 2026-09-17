@@ -27,7 +27,7 @@ export const ACTIONS = {
   cancel: "approval_cancel",
   reschedule: "approval_reschedule",
   listPage: "approval_list_page",
-  noop: "approval_noop",
+  create: "approval_create",
 } as const;
 
 export const CALLBACKS = {
@@ -68,6 +68,44 @@ function creativeLine(approval: ApprovalWithClient): string {
   return approval.creative_version
     ? `${clean(approval.creative_name)} (${clean(approval.creative_version)})`
     : clean(approval.creative_name);
+}
+
+// ---------------------------------------------------------------------------
+// Install welcome — DM'd to whoever installed the app
+// ---------------------------------------------------------------------------
+
+/**
+ * The message sent the moment installation finishes.
+ *
+ * The install page is a browser tab the installer may already have closed by
+ * the time they're back in Slack; this puts the next step where they
+ * actually are, so getting started is "click the button" rather than "recall
+ * a slash command from a README."
+ */
+export function installWelcomeMessage(): { text: string; blocks: SlackBlock[] } {
+  return {
+    text: "Approval Chaser is connected. Run /approval create to send your first one.",
+    blocks: [
+      section(
+        "👋 *Approval Chaser is connected.*\nSend a creative for approval and " +
+          "I'll chase the client and keep this workspace posted — no more " +
+          "manual follow-ups.",
+      ),
+      {
+        type: "actions",
+        elements: [
+          {
+            type: "button",
+            action_id: ACTIONS.create,
+            style: "primary",
+            text: { type: "plain_text", text: "Create your first approval" },
+            value: "welcome",
+          },
+        ],
+      },
+      context("Or type `/approval create` in any channel, any time."),
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +408,26 @@ export const FIELDS = {
 } as const;
 
 /** The /approval create modal. */
-export function createModalView(defaultDeadlineEpoch: number): Record<string, unknown> {
+/** The last client this Slack user sent an approval to. Prefills the modal. */
+export interface ClientPrefill {
+  name: string;
+  email: string;
+  contactName: string | null;
+}
+
+/**
+ * The /approval create modal.
+ *
+ * When `prefill` is given — the requester's most recent client — the three
+ * client fields arrive already filled in. An agency that sends the same
+ * client three creatives a week should not retype that client's email three
+ * times a week; they clear the field themselves on the rare approval that
+ * goes somewhere new.
+ */
+export function createModalView(
+  defaultDeadlineEpoch: number,
+  prefill?: ClientPrefill,
+): Record<string, unknown> {
   return {
     type: "modal",
     callback_id: CALLBACKS.create,
@@ -387,6 +444,7 @@ export function createModalView(defaultDeadlineEpoch: number): Record<string, un
           action_id: "value",
           max_length: 120,
           placeholder: { type: "plain_text", text: "ABC Clothing" },
+          ...(prefill ? { initial_value: prefill.name } : {}),
         },
       },
       {
@@ -397,6 +455,7 @@ export function createModalView(defaultDeadlineEpoch: number): Record<string, un
           type: "email_text_input",
           action_id: "value",
           placeholder: { type: "plain_text", text: "sarah@example.com" },
+          ...(prefill ? { initial_value: prefill.email } : {}),
         },
       },
       {
@@ -409,6 +468,7 @@ export function createModalView(defaultDeadlineEpoch: number): Record<string, un
           action_id: "value",
           max_length: 80,
           placeholder: { type: "plain_text", text: "Sarah" },
+          ...(prefill?.contactName ? { initial_value: prefill.contactName } : {}),
         },
       },
       {
