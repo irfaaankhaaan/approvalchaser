@@ -10,6 +10,7 @@ import {
 import { LIST_PAGE_SIZE, listBlocks, type ListMode } from "@/lib/slack/blocks";
 import { buildCreateModalView } from "@/lib/slack/create-modal";
 import { OPEN_LIST_STATUSES, RECENT_LIST_STATUSES } from "@/lib/slack/list-statuses";
+import { SLACK_NOT_CONFIGURED_MESSAGE, slackIsConfigured } from "@/lib/slack/env-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,14 @@ function ephemeral(text: string, blocks?: unknown[]) {
 }
 
 export async function POST(request: Request) {
+  // A deployment missing its Slack secrets cannot verify anything Slack
+  // sends it. Caught here, before the signing secret is even read, so that
+  // a misconfigured deploy answers with a clean, expected status rather
+  // than an unhandled exception.
+  if (!slackIsConfigured()) {
+    return new NextResponse(SLACK_NOT_CONFIGURED_MESSAGE, { status: 503 });
+  }
+
   // The signature is checked against the raw bytes, before anything is parsed.
   const rawBody = await request.text();
   const verified = verifySlackRequest(request, rawBody, env.slackSigningSecret);

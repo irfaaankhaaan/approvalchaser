@@ -37,6 +37,7 @@ import { mintAgencyLink } from "@/lib/crypto/signed-link";
 import { buildCreateModalView } from "@/lib/slack/create-modal";
 import { safeExternalUrl } from "@/lib/format";
 import { OPEN_LIST_STATUSES, RECENT_LIST_STATUSES } from "@/lib/slack/list-statuses";
+import { SLACK_NOT_CONFIGURED_MESSAGE, slackIsConfigured } from "@/lib/slack/env-guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,6 +54,10 @@ export const dynamic = "force-dynamic";
  */
 
 export async function POST(request: Request) {
+  if (!slackIsConfigured()) {
+    return new NextResponse(SLACK_NOT_CONFIGURED_MESSAGE, { status: 503 });
+  }
+
   const rawBody = await request.text();
   const verified = verifySlackRequest(request, rawBody, env.slackSigningSecret);
   if (!verified.ok) {

@@ -1,4 +1,4 @@
-import { NextResponse, after } from "next/server";
+import { after } from "next/server";
 import { env } from "@/lib/env";
 import { verifyOAuthState } from "@/lib/slack/verify";
 import { encryptSecret } from "@/lib/crypto/secretbox";
@@ -8,6 +8,8 @@ import {
   upsertSlackInstallation,
 } from "@/lib/db/repositories";
 import { sendInstallWelcome } from "@/lib/notifications/service";
+import { slackIsConfigured } from "@/lib/slack/env-guard";
+import { htmlPage as html } from "@/lib/slack/error-page";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +22,16 @@ export const dynamic = "force-dynamic";
  * creating a second tenant that would not see the first one's approvals.
  */
 export async function GET(request: Request) {
+  // Reachable directly (not only via /api/slack/install), so it gets its own
+  // check rather than relying on install's.
+  if (!slackIsConfigured()) {
+    return html(
+      503,
+      "Slack isn't set up yet",
+      "This deployment hasn't been configured with Slack credentials.",
+    );
+  }
+
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
@@ -105,18 +117,5 @@ export async function GET(request: Request) {
       ? "Check Slack — I've sent you a DM with the next step. Or head back " +
         "and run <code>/approval create</code> in any channel."
       : "Head back to Slack — everything you had before is still there.",
-  );
-}
-
-function html(status: number, title: string, body: string) {
-  return new NextResponse(
-    `<!doctype html><html><head><meta charset="utf-8">
-     <meta name="viewport" content="width=device-width,initial-scale=1">
-     <title>${title}</title>
-     <style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-     background:#f6f7f9;color:#111827;display:grid;place-items:center;height:100vh;margin:0}
-     div{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:32px;max-width:420px;text-align:center}
-     </style></head><body><div><h1>${title}</h1><p>${body}</p></div></body></html>`,
-    { status, headers: { "content-type": "text/html; charset=utf-8" } },
   );
 }
