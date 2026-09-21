@@ -45,20 +45,33 @@ Adding WhatsApp, Teams or Discord later means a new adapter next to
 
 ## Running it locally
 
-You need Node 20.9+. You do **not** need a Postgres server to start.
+You need [Node.js](https://nodejs.org) 20.9+ installed. You do **not** need a
+Postgres server, an account, or any API keys to start.
+
+**Windows:** double-click **`start.bat`**.
+**Mac / Linux:** run **`./start.sh`** in a terminal in this folder.
+
+Either one installs dependencies, generates your local config, loads three
+demo approvals, and starts the app — in that order, only doing the steps
+that haven't been done yet. Run it again later and it just starts the app.
+When it says `Ready`, open <http://localhost:3000>, then paste in one of the
+demo links it printed to see a real approval page.
+
+<details>
+<summary>Or, step by step (what the script above is doing)</summary>
 
 ```bash
 npm install
-npm run setup    # creates .env.local and generates its two random secrets
+npm run setup    # creates .env.local and generates its random secrets
 npm run db:seed  # optional: three demo approvals
 npm run dev
 ```
 
-`npm run setup` is the whole "generate two secrets and paste them in the
-right place" step done for you — it's safe to run again later, and leaves
-anything you've already filled in alone. The only things left to type by hand
-are the Slack app credentials (below), and only if you want Slack; the client
-side works without them.
+`npm run setup` is the whole "generate secrets and paste them in the right
+place" step done for you — it's safe to run again later, and leaves anything
+you've already filled in alone. The only things left to type by hand are the
+Slack app credentials (below), and only if you want Slack; the client side
+works without them.
 
 With `DATABASE_URL` left blank, the app runs **PGlite** — real Postgres,
 compiled to WASM, persisted in `.pgdata/`. The schema in `db/schema.sql` is
@@ -68,9 +81,11 @@ terminal with the approval link included, so you can click straight through.
 `npm run db:seed` prints three working client links. Open one and the whole
 client side works immediately — including with JavaScript disabled.
 
+</details>
+
 ```bash
 npm run check       # typecheck + lint + tests
-npm test            # 178 tests
+npm test            # 182 tests
 npm run db:migrate  # apply db/schema.sql to DATABASE_URL
 ```
 
@@ -289,7 +304,7 @@ On another host, call `GET /api/cron` every five minutes with
 ## Tests
 
 ```bash
-npm test     # 178 tests
+npm test     # 182 tests
 ```
 
 The suite runs against **real Postgres in-process** (PGlite), applying
