@@ -45,16 +45,15 @@ if not exist .pgdata (
     echo Loading three demo approvals so there is something to click on...
     call npm run db:seed
     echo.
-    echo ============================================
-    echo  Copy one of the http://localhost:3000/approve/... links above.
-    echo  You'll paste it into your browser once the app says "Ready".
-    echo ============================================
-    echo.
 )
 
-echo Starting the app...
-echo Once you see "Ready", open http://localhost:3000 in your browser.
-echo Press Ctrl+C in this window to stop it.
+echo ============================================
+echo  Starting the app...
+echo  Once you see "Ready", open:
+echo    http://localhost:3000/dashboard   - create and manage approvals
+echo  Or paste in one of the demo links printed above to see one already
+echo  filled in. Press Ctrl+C in this window to stop the app.
+echo ============================================
 echo.
 call npm run dev
 

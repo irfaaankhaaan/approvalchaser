@@ -1,24 +1,29 @@
 # Slack Approval Chaser
 
-A Slack-first approval bot for creative agencies. You send a creative for
-sign-off from Slack; your client gets one email link, with no account and no
-login; the bot chases them on a schedule and tells you in Slack the moment
-something is approved, changed, or about to be late.
+An approval bot for creative agencies. You send a creative for sign-off —
+from a **web dashboard** or from **Slack**, whichever you use — and your
+client gets one email link, with no account and no login. It chases them on
+a schedule and tells you the moment something is approved, changed, or about
+to be late.
 
 It does one thing. It is not project management, a CRM, file storage, or
 proofing software.
 
 ```
-Slack: /approval create
+Dashboard or Slack: create an approval
    ↓
 client gets an email with a private link
    ↓
 client approves  ──or──  requests changes
    ↓                          ↓
-Slack thread updates     Slack thread updates, reminders stop
+you're notified          you're notified, reminders stop
    ↓
-no response? → 12h, 4h and 2h reminders → deadline warning → overdue → agency escalated in Slack
+no response? → 12h, 4h and 2h reminders → deadline warning → overdue → you're escalated to
 ```
+
+Slack is entirely optional. The dashboard talks to the exact same code as
+the Slack commands, so an approval created in one shows up correctly in the
+other — nothing about Slack is required to use this for real.
 
 ---
 
@@ -26,6 +31,7 @@ no response? → 12h, 4h and 2h reminders → deadline warning → overdue → a
 
 | Layer | Where | What it does |
 |---|---|---|
+| Web dashboard | `src/app/dashboard/` | Create, list, remind and cancel approvals — no Slack needed |
 | Slack adapter | `src/app/api/slack/*`, `src/lib/slack/` | Signature checks, OAuth install, slash commands, buttons, modals |
 | Approval engine | `src/lib/approvals/` | The state machine and every transition |
 | Reminder engine | `src/lib/reminders/` | Deterministic planning, the sweep, escalation |
@@ -35,8 +41,12 @@ no response? → 12h, 4h and 2h reminders → deadline warning → overdue → a
 | Data layer | `src/lib/db/` | Org-scoped SQL over `pg` |
 | Audit | `approval_events`, via `appendEvent` | Every significant action |
 | Public client page | `src/app/approve/` | The one page clients ever see |
-| Agency view | `src/app/a/[token]` | Read-only detail and history |
+| Agency detail view | `src/app/a/[token]` | Read-only history, reached from both the dashboard and Slack |
 | Scheduler | `src/app/api/cron` | Driven by Vercel Cron |
+
+Both entry points — the dashboard and Slack — call the same functions in
+`src/lib/approvals` and `src/lib/reminders`. There is one set of rules for
+what an approval can do, not two.
 
 Adding WhatsApp, Teams or Discord later means a new adapter next to
 `src/lib/slack/` and `src/lib/email/`. Nothing else has to move.
@@ -54,8 +64,9 @@ Postgres server, an account, or any API keys to start.
 Either one installs dependencies, generates your local config, loads three
 demo approvals, and starts the app — in that order, only doing the steps
 that haven't been done yet. Run it again later and it just starts the app.
-When it says `Ready`, open <http://localhost:3000>, then paste in one of the
-demo links it printed to see a real approval page.
+When it says `Ready`, open **<http://localhost:3000/dashboard>** — that's
+where you create and manage approvals. No Slack, no terminal commands after
+this one.
 
 <details>
 <summary>Or, step by step (what the script above is doing)</summary>
@@ -85,15 +96,38 @@ client side works immediately — including with JavaScript disabled.
 
 ```bash
 npm run check       # typecheck + lint + tests
-npm test            # 182 tests
+npm test            # 188 tests
 npm run db:migrate  # apply db/schema.sql to DATABASE_URL
 ```
 
 ### The minimum to fill in
 
-For the client side alone, nothing: `npm run setup` plus the seed script and
-the approval page work out of the box. For Slack you need a Slack app (below).
-For real email you need a Resend key and a verified sending domain.
+For the dashboard alone, nothing: `npm run setup` plus a running server is
+the whole story. For Slack you need a Slack app (below). For real email you
+need a Resend key and a verified sending domain.
+
+---
+
+## The web dashboard
+
+`http://localhost:3000/dashboard` (or wherever you deploy it) — everything
+`/approval create`, `/approval list`, `/approval remind` and
+`/approval cancel` do in Slack, as a page instead. **New approval** opens a
+form with the same fields as the Slack modal; the table lists what's open,
+with **Remind**, **Cancel** and **View** (the same detail-and-history page
+Slack's own "View approval" button opens) on each row.
+
+There is no login. The dashboard resolves to whichever organization already
+exists — the same one your Slack workspace uses, if you have one connected,
+created automatically on first visit otherwise — because there is no signed-in
+user to derive it from any other way. Click the agency name at the top left
+to rename it.
+
+**That absence of a login is a real tradeoff, not an oversight**: anyone who
+can reach the URL can see and manage every approval. Fine for your own
+machine or a private network — which is what `start.bat` / `start.sh` set
+up — but don't put this on the public internet without putting your own
+authentication in front of it first.
 
 ---
 
@@ -304,7 +338,7 @@ On another host, call `GET /api/cron` every five minutes with
 ## Tests
 
 ```bash
-npm test     # 182 tests
+npm test     # 188 tests
 ```
 
 The suite runs against **real Postgres in-process** (PGlite), applying
@@ -327,7 +361,15 @@ email templates and escaping; Resend's real idempotency option (not a
 lookalike custom header); rate limiting under concurrency; the create-modal
 client prefill, including its own cross-organization isolation check; the
 install welcome DM, sent exactly once even when two install callbacks race
-for the same workspace.
+for the same workspace; the dashboard's default-organization resolution,
+including that it never creates a second one once the first exists.
+
+The dashboard's own pages and forms are verified live with a real browser
+(screenshots, not just a passing exit code) rather than with component
+tests, the same way the client approval page is — this codebase has no
+React testing library, and the server actions underneath both are thin
+wrappers around the same, already-tested `src/lib/approvals` and
+`src/lib/reminders` functions.
 
 ---
 
@@ -336,9 +378,15 @@ for the same workspace.
 - **One workspace is one organization.** There is no way to merge two
   workspaces into one agency, or to invite a second workspace into an existing
   one.
-- **No agency login.** Slack *is* the interface. The web view is read-only and
-  reached through a one-hour signed link minted inside Slack. Anything that
-  changes state happens in Slack, where the request is signature-verified.
+- **No agency login, anywhere.** The dashboard has no auth at all — see the
+  note in its own section above. The detail-and-history view is read-only
+  and reached through a one-hour signed link, minted either by the
+  dashboard or inside Slack.
+- **The dashboard is single-organization.** It always resolves to whichever
+  organization already exists (creating one on first visit if there is
+  truly none) — there is no way, from the dashboard, to choose between
+  several. Multiple organizations only arise from multiple Slack
+  workspaces, which the dashboard was not built to switch between.
 - **Reminder granularity is the cron interval**, five minutes by default.
 - **Reminder offsets are relative to the deadline only.** There is no "every
   two days until they answer" mode, and no quiet hours — a 3am deadline gets

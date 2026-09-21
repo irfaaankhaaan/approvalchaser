@@ -67,6 +67,40 @@ export async function updateOrganizationTimezone(
   ]);
 }
 
+export async function renameOrganization(
+  organizationId: string,
+  name: string,
+): Promise<Organization | undefined> {
+  return sqlOne<Organization>(
+    `UPDATE organizations SET name = $2 WHERE id = $1 RETURNING *`,
+    [organizationId, name],
+  );
+}
+
+/**
+ * The organization the web dashboard operates on.
+ *
+ * The dashboard has no login — it is the no-Slack, run-it-yourself path, so
+ * there is no signed-in user to derive an organization from the way Slack's
+ * verified team_id does. In that setting "the organization" is simply
+ * whichever one already exists; the oldest is created on first visit if
+ * there is truly nothing yet.
+ *
+ * Two dashboard tabs both loading for the very first time in the same
+ * instant could both find nothing and both insert a row — a real but rare
+ * race, and a cheap one: the older row is what every later call returns, so
+ * the loser is an unused, harmless orphan, never a lost or duplicated
+ * approval. Not worth a lock for a page one person opens on their own
+ * machine.
+ */
+export async function getOrCreateDefaultOrganization(): Promise<Organization> {
+  const existing = await sqlOne<Organization>(
+    `SELECT * FROM organizations ORDER BY created_at ASC LIMIT 1`,
+  );
+  if (existing) return existing;
+  return createOrganization("My Agency");
+}
+
 /** Find or create the agency-side user behind a Slack user id. */
 export async function upsertUserBySlackId(input: {
   organizationId: string;
